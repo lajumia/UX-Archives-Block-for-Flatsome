@@ -1,0 +1,25 @@
+.portfolio-thumbnail {
+    position: relative;
+    display: inline-block;
+}
+
+.portfolio-thumbnail img {
+    cursor: zoom-in;
+    transition: transform 0.3s ease;
+}
+
+.portfolio-thumbnail img:hover {
+    transform: scale(1.01);
+}
+
+.zoom-icon {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: rgba(0,0,0,0.5);
+    color: #fff;
+    padding: 5px 8px;
+    border-radius: 50%;
+    font-size: 16px;
+    pointer-events: none;
+}
