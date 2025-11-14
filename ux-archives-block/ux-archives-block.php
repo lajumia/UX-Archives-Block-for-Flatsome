@@ -1,9 +1,10 @@
 <?php
 /*
 Plugin Name: UX Archives Block for Flatsome
-Description: Adds a Flatsome UX Builder Archives Grid element for the 'archives' post type (filtering, lightbox/single, load more).
-Version: 2.0
+Description: Adds a Flatsome UX Builder Archives Grid element for the 'archives' post type (filtering, lightbox/single, pagination more).
+Version: 3.0.0
 Author: Md Laju Miah
+Author URI: https://wpspeedpress.com/
 Text Domain: ux-archives-block
 */
 
@@ -15,7 +16,7 @@ if ( ! defined( 'UX_ARCHIVES_PLUGIN_DIR' ) ) {
 }
 
 /**
- * Optional: Register CPT & taxonomies if they don't already exist.
+ * Register CPT & taxonomies if they don't already exist.
  * If you already registered 'archives' and 'archives_category'/'archives_tag' in your theme, skip this block.
  */
 add_action( 'init', function() {
@@ -107,11 +108,6 @@ add_action( 'ux_builder_setup', function() {
 				'options' => array( '2' => 2, '3' => 3, '4' => 4 ),
 				'default' => 4,
 			),
-			'show_filter' => array(
-				'type'    => 'checkbox',
-				'heading' => __( 'Show category filter', 'ux-archives-block' ),
-				'default' => true,
-			),
 			'filter_taxonomy' => array(
 				'type'    => 'select',
 				'heading' => __( 'Filter taxonomy', 'ux-archives-block' ),
@@ -120,20 +116,6 @@ add_action( 'ux_builder_setup', function() {
 					'archives_tag'      => __( 'Tags', 'ux-archives-block' ),
 				),
 				'default' => 'archives_category',
-			),
-			'link_type' => array(
-				'type'    => 'select',
-				'heading' => __( 'Item link type', 'ux-archives-block' ),
-				'options' => array(
-					'lightbox' => __( 'Open image in lightbox', 'ux-archives-block' ),
-					'single'   => __( 'Go to single post', 'ux-archives-block' ),
-				),
-				'default' => 'lightbox',
-			),
-			'enable_loadmore' => array(
-				'type' => 'checkbox',
-				'heading' => __( 'Enable Load More button', 'ux-archives-block' ),
-				'default' => 'no',
 			),
 		),
 	) );
@@ -151,7 +133,7 @@ add_shortcode( 'ux_archives', function( $atts ) {
 		'show_filter'     => 'yes',
 		'filter_taxonomy' => 'archives_category',
 		'link_type'       => 'lightbox',
-		'enable_loadmore' => 'no',
+		'show_pagination' => true,
 	);
 
 	$atts = shortcode_atts( $defaults, $atts, 'ux_archives' );
@@ -185,72 +167,29 @@ add_shortcode( 'ux_archives', function( $atts ) {
 
 
 /* ---------------------------
- * AJAX Load More handler
- * --------------------------*/
-add_action( 'wp_ajax_nopriv_ux_archives_load', 'ux_archives_loadmore_ajax' );
-add_action( 'wp_ajax_ux_archives_load', 'ux_archives_loadmore_ajax' );
-
-function ux_archives_loadmore_ajax() {
-	// Check nonce
-	if ( empty( $_POST['nonce'] ) || ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['nonce'] ) ), 'ux_archives_load' ) ) {
-		wp_send_json_error( 'invalid_nonce', 403 );
-	}
-
-	// Validate and decode query
-	$raw = wp_unslash( $_POST['query'] ?? '' );
-	$page = isset( $_POST['page'] ) ? intval( $_POST['page'] ) : 0;
-
-	$args = json_decode( $raw, true );
-	if ( ! is_array( $args ) ) wp_send_json_error( 'invalid_query' );
-
-	// Safety: enforce post_type = archives
-	$args['post_type'] = 'archives';
-	$args['paged'] = $page + 1;
-	$args['posts_per_page'] = isset( $args['posts_per_page'] ) ? min( 48, intval( $args['posts_per_page'] ) ) : 8;
-
-	// Prevent dangerous keys
-	$allowed = array( 'post_type', 'posts_per_page', 'paged', 'orderby', 'order', 'tax_query' );
-	$safe_args = array();
-	foreach ( $allowed as $k ) {
-		if ( isset( $args[ $k ] ) ) $safe_args[ $k ] = $args[ $k ];
-	}
-
-	$q = new WP_Query( $safe_args );
-	ob_start();
-
-	if ( $q->have_posts() ) {
-		while ( $q->have_posts() ) {
-			$q->the_post();
-			$partial = UX_ARCHIVES_PLUGIN_DIR . 'templates/partials/ux-archives-item.php';
-			if ( file_exists( $partial ) ) {
-				include $partial;
-			}
-		}
-	}
-	wp_reset_postdata();
-
-	$html = ob_get_clean();
-	wp_send_json_success( $html );
-}
-
-
-/* ---------------------------
  * Enqueue scripts (only when needed)
  * --------------------------*/
-
 add_action('wp_enqueue_scripts', function() {
-    
-	wp_enqueue_style('ux-archives-css', UX_ARCHIVES_PLUGIN_URL . 'assets/archives.css', [], null);
-	//wp_enqueue_script('ux-archives-js', UX_ARCHIVES_PLUGIN_URL . 'assets/archives-fb.js', ['jquery'], null, true);
 
-	global $post;
-    // Check if the current post/page has the [ux_archives] shortcode
-    if ( isset($post->post_content) && has_shortcode( $post->post_content, 'ux_archives' ) ) {
+    wp_enqueue_style('ux-archives-css', UX_ARCHIVES_PLUGIN_URL . 'assets/archives.css', [], null);
 
-        // Path to isotope inside your plugin's assets folder
-        $isotope_path = plugin_dir_url( __FILE__ ) . 'assets/isotope.pkgd.min.js';
+    global $post;
+    $should_load_lightbox = false;
 
-        // Enqueue Isotope with jQuery as dependency
+    // Load on shortcode page
+    if ($post && isset($post->post_content) && has_shortcode($post->post_content, 'ux_archives')) {
+        $should_load_lightbox = true;
+    }
+
+    // Load on single "archives" post type
+    if (is_singular('archives')) {
+        $should_load_lightbox = true;
+    }
+
+    if ($should_load_lightbox) {
+
+        // Isotope
+        $isotope_path = plugin_dir_url(__FILE__) . 'assets/isotope.pkgd.min.js';
         wp_enqueue_script(
             'ux-archives-isotope-js',
             $isotope_path,
@@ -259,14 +198,26 @@ add_action('wp_enqueue_scripts', function() {
             true
         );
 
-		
+        // GLightbox CSS
+        wp_enqueue_style(
+            'glightbox-css',
+            'https://cdn.jsdelivr.net/npm/glightbox/dist/css/glightbox.min.css',
+            [],
+            '3.2.0'
+        );
+
+        // GLightbox JS
+        wp_enqueue_script(
+            'glightbox-js',
+            'https://cdn.jsdelivr.net/npm/glightbox/dist/js/glightbox.min.js',
+            array('jquery'),
+            '3.2.0',
+            true
+        );
+
     }
 
-	
-
-
-}, 10 );
-
+}, 20);
 
 /**
  * Load single archive template
@@ -274,7 +225,7 @@ add_action('wp_enqueue_scripts', function() {
 add_filter( 'single_template', function( $single ) {
 	global $post;
 	if ( $post->post_type === 'archives' ) {
-		$file = UX_ARCHIVES_PLUGIN_DIR . 'templates/ux-single-archive-template.php';
+		$file = UX_ARCHIVES_PLUGIN_DIR . 'templates/ux-single-archives-template.php';
 		if ( file_exists( $file ) ) {
 			return $file;
 		}
@@ -284,5 +235,63 @@ add_filter( 'single_template', function( $single ) {
 
 
 	
+// AJAX handler for UX Archives dynamic loading
+add_action('wp_ajax_ux_filter_posts', 'ux_filter_posts_callback');
+add_action('wp_ajax_nopriv_ux_filter_posts', 'ux_filter_posts_callback');
+
+function ux_filter_posts_callback() {
+    // Sanitize incoming data
+    $taxonomy        = isset($_POST['taxonomy']) ? sanitize_text_field($_POST['taxonomy']) : '';
+    $term_slug       = isset($_POST['term_slug']) ? sanitize_text_field($_POST['term_slug']) : '';
+    $posts_per_page  = isset($_POST['posts_per_page']) ? intval($_POST['posts_per_page']) : 8;
+	$columns 		= isset($_POST['columns']) ? intval($_POST['columns']) : 4;
+    $paged           = isset($_POST['paged']) ? intval($_POST['paged']) : 1;
+
+    // Post type — change if needed
+    $post_type = 'archives';
+
+    // Build query
+    $query_args = array(
+        'post_type'      => $post_type,
+        'posts_per_page' => $posts_per_page,
+        'paged'          => $paged,
+    );
+
+    if ($taxonomy && $term_slug) {
+        $query_args['tax_query'] = array(
+            array(
+                'taxonomy' => $taxonomy,
+                'field'    => 'slug',
+                'terms'    => $term_slug,
+            ),
+        );
+    }
+
+    $query = new WP_Query($query_args);
+
+    // Capture HTML output
+    ob_start();
+
+    if ($query->have_posts()) :
+        while ($query->have_posts()) : $query->the_post();
+            // Include your template partial
+            include UX_ARCHIVES_PLUGIN_DIR . 'templates/partials/ux-archives-item.php';
+        endwhile;
+    else :
+        echo '<p>No items found.</p>';
+    endif;
+
+    $html = ob_get_clean();
+
+    // Return JSON response with pagination info
+    $response = array(
+        'html'         => $html,
+        'total_pages'  => $query->max_num_pages,
+        'current_page' => $paged,
+    );
+
+    wp_send_json($response); // Proper JSON response
+}
+
 
 
